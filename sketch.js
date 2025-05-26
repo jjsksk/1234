@@ -156,10 +156,9 @@ function checkRejections() {
     let hand = predictions[0].annotations;
     let tips = ["thumb", "indexFinger", "middleFinger", "ringFinger", "pinky"].map(f => hand[f][3]);
 
-    // 讓五指合併判斷更嚴格
     let isClosed = tips.every((p, i, arr) => {
       if (i === 0) return true;
-      return dist(p[0], p[1], arr[i - 1][0], arr[i - 1][1]) < 20; // 原本是30
+      return dist(p[0], p[1], arr[i - 1][0], arr[i - 1][1]) < 30;
     });
 
     if (isClosed) {
@@ -167,7 +166,7 @@ function checkRejections() {
         let c = characters[i];
         let hx = tips[2][0];
         let hy = tips[2][1];
-        if (dist(hx, hy, c.x, c.y) < 30) { // 原本是40
+        if (dist(hx, hy, c.x, c.y) < 40) {
           score += c.score;
           characters.splice(i, 1);
         }
