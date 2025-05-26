@@ -1,25 +1,27 @@
+// 必要變數
 let video;
-let poseNet;
-let poses = [];
-
-let roleImgs = [];
-let veilImg;
-let roles = [];
-
-let score = 0;
-let timer = 50;
-let gameStarted = false;
-let showInstructions = true;
-let countdown = 10;
+let handpose;
+let predictions = [];
+let gameState = "intro"; // intro, playing, ended
 let startTime;
+let timer = 50;
+let score = 0;
+let characters = [];
 let heartPos;
+let veilImg;
+let characterImgs = [];
+let charData = [
+  { src: "IMG_6032-removebg-preview.png", score: 4 },
+  { src: "IMG_6034-removebg-preview.png", score: 7 },
+  { src: "IMG_6036-removebg-preview.png", score: 5 },
+  { src: "IMG_6035-removebg-preview.png", score: 6 },
+  { src: "IMG_6037-removebg-preview.png", score: 3 },
+];
 
 function preload() {
-  veilImg = loadImage("veil.png");
-  for (let i = 6032; i <= 6037; i++) {
-    if (i !== 6033) {
-      roleImgs.push(loadImage(`IMG_${i}-removebg-preview.png`));
-    }
+  veilImg = loadImage("veil.png"); // 頭紗圖片
+  for (let c of charData) {
+    characterImgs.push(loadImage(c.src));
   }
 }
 
@@ -29,176 +31,160 @@ function setup() {
   video.size(width, height);
   video.hide();
 
-  poseNet = ml5.poseNet(video, () => {
-    console.log("PoseNet Ready");
-  });
-  poseNet.on("pose", function(results) {
-    poses = results;
-  });
+  handpose = ml5.handpose(video, () => console.log("Handpose model ready"));
+  handpose.on("predict", results => predictions = results);
 
-  heartPos = createVector(width * 0.4, height * 0.6);
-  startTime = millis();
+  heartPos = createVector(width / 2 - 100, height / 2 + 50);
+  textAlign(CENTER, CENTER);
+  textSize(18);
 }
 
 function draw() {
-  background(255);
-  push();
-  translate(width, 0);
-  scale(-1, 1);
   image(video, 0, 0, width, height);
-  pop();
+  drawHeart();
+  drawVeil();
 
-  if (showInstructions) {
-    fill(0, 180);
-    rect(0, 0, width, height);
-    fill(255);
-    textAlign(CENTER, CENTER);
-    textSize(28);
-    text("你是一位即將被逼婚的新娘！\n\n頭上會自動戴上頭紗\n請用「五指併攏」對著追求者拒絕他們！\n\n但要小心！如果他們碰到你左胸前的心臟會扣分！\n\n準備倒數：" + countdown, width / 2, height / 2);
-    if (millis() - startTime >= 1000) {
-      countdown--;
+  if (gameState === "intro") {
+    drawIntro();
+    if (millis() > 10000) {
+      gameState = "playing";
       startTime = millis();
     }
-    if (countdown <= 0) {
-      showInstructions = false;
-      gameStarted = true;
-      startTime = millis();
+  } else if (gameState === "playing") {
+    updateCharacters();
+    drawCharacters();
+    checkRejections();
+    drawUI();
+    checkHeartCollision();
+
+    if (millis() - startTime > timer * 1000) {
+      gameState = "ended";
     }
-    return;
-  }
-
-  if (gameStarted) {
-    let elapsed = floor((millis() - startTime) / 1000);
-    timer = 50 - elapsed;
-    if (timer <= 0) {
-      gameStarted = false;
-    }
-
-    drawHeart();
-
-    for (let r of roles) {
-      r.update();
-      r.display();
-    }
-
-    drawVeil();
-
-    detectRejection();
-    detectHeartTouch();
-
-    fill(0);
-    textSize(24);
-    textAlign(LEFT, TOP);
-    text(`分數：${score}`, 10, 10);
-    text(`剩餘時間：${timer}s`, 10, 40);
-
-    if (roles.length < 10 && frameCount % 30 === 0) {
-      roles.push(new Role());
-    }
-
-  } else {
-    fill(0, 180);
-    rect(0, 0, width, height);
-    fill(255);
-    textAlign(CENTER, CENTER);
+  } else if (gameState === "ended") {
+    drawCharacters();
+    drawUI();
+    fill(255, 0, 0);
     textSize(32);
-    text(`遊戲結束！你的總分：${score}\n\n按下 R 鍵重新開始`, width / 2, height / 2);
+    text("遊戲結束！\n總分：" + score, width / 2, height / 2);
+    textSize(18);
+    text("點擊畫面重新開始", width / 2, height / 2 + 50);
   }
 }
 
-function keyPressed() {
-  if (!gameStarted && key === 'r') {
+function mousePressed() {
+  if (gameState === "ended") {
+    gameState = "intro";
     score = 0;
-    roles = [];
-    countdown = 10;
-    showInstructions = true;
-    startTime = millis();
+    characters = [];
+    predictions = [];
   }
 }
 
-function drawVeil() {
-  if (poses.length > 0) {
-    let head = poses[0].pose.keypoints.find(p => p.part === 'nose');
-    if (head && head.score > 0.5) {
-      imageMode(CENTER);
-      image(veilImg, width - head.position.x, head.position.y - 50, 200, 200);
-    }
-  }
+function drawIntro() {
+  fill(0, 150);
+  rect(0, 0, width, height);
+  fill(255);
+  textSize(24);
+  text("歡迎參加拒婚挑戰！\n舉起五指合併的手拒絕追求者！\n若角色靠近你的心會扣分！", width / 2, height / 2);
+}
+
+function drawUI() {
+  fill(0);
+  rect(0, 0, 200, 60);
+  fill(255);
+  textAlign(LEFT);
+  text("剩餘時間：" + max(0, int(timer - (millis() - startTime) / 1000)), 10, 20);
+  text("分數：" + score, 10, 45);
 }
 
 function drawHeart() {
   push();
   noStroke();
-  fill(255, 0, 0, 100);
-  let t = millis() / 200;
-  let s = 30 + sin(t) * 10;
-  heartPos.set(width * 0.4, height * 0.6);
+  fill(255, 0, 0, 127);
+  let beat = 10 * sin(millis() / 200);
   translate(heartPos.x, heartPos.y);
   beginShape();
   for (let a = 0; a < TWO_PI; a += 0.1) {
-    let r = s * (1 - sin(a)) * 0.5;
-    let x = r * cos(a);
-    let y = r * sin(a);
+    let r = 15 + beat;
+    let x = r * 16 * pow(sin(a), 3);
+    let y = -r * (13 * cos(a) - 5 * cos(2 * a) - 2 * cos(3 * a) - cos(4 * a));
     vertex(x, y);
   }
   endShape(CLOSE);
   pop();
 }
 
-function detectRejection() {
-  if (poses.length > 0) {
-    let pose = poses[0].pose;
-    let rightWrist = pose.rightWrist;
+function drawVeil() {
+  if (predictions.length > 0) {
+    let face = predictions[0].annotations;
+    let topHead = face.midpoint[0];
+    image(veilImg, topHead[0] - 100, topHead[1] - 150, 200, 200);
+  }
+}
 
-    if (rightWrist.confidence > 0.5) {
-      for (let i = roles.length - 1; i >= 0; i--) {
-        if (dist(width - rightWrist.x, rightWrist.y, roles[i].x, roles[i].y) < 50) {
-          score += roles[i].point;
-          roles.splice(i, 1);
-          break;
+function updateCharacters() {
+  if (characters.length < 10 && frameCount % 30 === 0) {
+    let idx = floor(random(characterImgs.length));
+    let c = {
+      img: characterImgs[idx],
+      x: random(width),
+      y: random(height),
+      dx: random(-1, 1),
+      dy: random(-1, 1),
+      size: 40,
+      score: charData[idx].score
+    };
+    characters.push(c);
+  }
+
+  for (let c of characters) {
+    c.x += c.dx;
+    c.y += c.dy;
+    if (c.x < 0 || c.x > width) c.dx *= -1;
+    if (c.y < 0 || c.y > height) c.dy *= -1;
+  }
+}
+
+function drawCharacters() {
+  for (let c of characters) {
+    image(c.img, c.x, c.y, c.size, c.size);
+  }
+}
+
+function checkRejections() {
+  if (predictions.length > 0) {
+    let hand = predictions[0].annotations;
+    let tips = ["thumb", "indexFinger", "middleFinger", "ringFinger", "pinky"].map(f => hand[f][3]);
+
+    let isClosed = tips.every((p, i, arr) => {
+      if (i === 0) return true;
+      return dist(p[0], p[1], arr[i - 1][0], arr[i - 1][1]) < 30;
+    });
+
+    if (isClosed) {
+      for (let i = characters.length - 1; i >= 0; i--) {
+        let c = characters[i];
+        let hx = tips[2][0];
+        let hy = tips[2][1];
+        if (dist(hx, hy, c.x, c.y) < 40) {
+          score += c.score;
+          characters.splice(i, 1);
         }
       }
     }
   }
 }
 
-function detectHeartTouch() {
-  for (let i = roles.length - 1; i >= 0; i--) {
-    if (dist(roles[i].x, roles[i].y, heartPos.x, heartPos.y) < 40) {
+function checkHeartCollision() {
+  for (let i = characters.length - 1; i >= 0; i--) {
+    let c = characters[i];
+    if (dist(c.x, c.y, heartPos.x, heartPos.y) < 40) {
       score -= 3;
-      roles.splice(i, 1);
+      characters.splice(i, 1);
     }
-  }
-}
-
-class Role {
-  constructor() {
-    this.img = random(roleImgs);
-    this.x = random(width);
-    this.y = random(height);
-    this.vx = random(-2, 2);
-    this.vy = random(-2, 2);
-    this.point = floor(random(1, 8));
-    this.size = 40;
-  }
-
-  update() {
-    this.x += this.vx;
-    this.y += this.vy;
-    if (this.x < 0 || this.x > width) this.vx *= -1;
-    if (this.y < 0 || this.y > height) this.vy *= -1;
-  }
-
-  display() {
-    imageMode(CENTER);
-    image(this.img, this.x, this.y, this.size, this.size);
   }
 }
 
 function windowResized() {
   resizeCanvas(windowWidth, windowHeight);
-}
-
-function touchStarted() {
-  userStartVideo();
 }
