@@ -1,4 +1,5 @@
 // 必要變數
+createCanvas(windowWidth, windowHeight);
 let video;
 let handpose;
 let predictions = [];
